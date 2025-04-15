@@ -73,22 +73,13 @@ jobs:
             --region ap-south-1 \
             --create-bucket-configuration LocationConstraint=ap-south-1
 
-          # Enable website hosting
-          aws s3api put-bucket-website \
+          # First, disable all public access blocks
+          aws s3api put-public-access-block \
             --bucket ${BUCKET_NAME} \
-            --website-configuration '{
-              "IndexDocument": {"Suffix": "index.html"},
-              "ErrorDocument": {"Key": "error.html"}
-            }'
+            --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
 
-          # Upload files
-          aws s3 sync dist/ s3://${BUCKET_NAME} --delete
-
-          # Set cache control for HTML files
-          aws s3 cp dist/index.html s3://${BUCKET_NAME}/index.html --cache-control "no-cache, no-store, must-revalidate"
-
-          # Set cache control for assets
-          aws s3 cp dist/assets/ s3://${BUCKET_NAME}/assets/ --recursive --cache-control "max-age=31536000, immutable"
+          # Wait a few seconds for the settings to take effect
+          sleep 5
 
           # Configure bucket policy for public access
           aws s3api put-bucket-policy \
@@ -106,10 +97,22 @@ jobs:
               ]
             }'
 
-          # Enable public access block configuration
-          aws s3api put-public-access-block \
+          # Enable website hosting
+          aws s3api put-bucket-website \
             --bucket ${BUCKET_NAME} \
-            --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+            --website-configuration '{
+              "IndexDocument": {"Suffix": "index.html"},
+              "ErrorDocument": {"Key": "error.html"}
+            }'
+
+          # Upload files
+          aws s3 sync dist/ s3://${BUCKET_NAME} --delete
+
+          # Set cache control for HTML files
+          aws s3 cp dist/index.html s3://${BUCKET_NAME}/index.html --cache-control "no-cache, no-store, must-revalidate"
+
+          # Set cache control for assets
+          aws s3 cp dist/assets/ s3://${BUCKET_NAME}/assets/ --recursive --cache-control "max-age=31536000, immutable"
 
           # Output the website URL
           echo "Frontend URL: http://${BUCKET_NAME}.s3-website-ap-south-1.amazonaws.com"
