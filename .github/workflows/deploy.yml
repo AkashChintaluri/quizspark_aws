@@ -58,7 +58,11 @@ jobs:
       - name: Terraform Plan
         run: |
           cd terraform
-          terraform plan -out=tfplan
+          terraform plan -out=tfplan \
+            -var="ecr_registry=${{ steps.login-ecr.outputs.registry }}" \
+            -var="supabase_url=${{ secrets.SUPABASE_URL }}" \
+            -var="supabase_key=${{ secrets.SUPABASE_KEY }}" \
+            -var="jwt_secret=${{ secrets.JWT_SECRET }}"
       
       - name: Terraform Apply
         run: |
