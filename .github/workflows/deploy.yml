@@ -55,12 +55,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd frontend
           npm install
 
       - name: Build frontend
         run: |
-          cd frontend
           npm run build
 
       - name: Deploy to S3
@@ -73,13 +71,13 @@ jobs:
           aws s3 website s3://quizspark-frontend --index-document index.html --error-document error.html
 
           # Upload files
-          aws s3 sync frontend/dist/ s3://quizspark-frontend --delete
+          aws s3 sync dist/ s3://quizspark-frontend --delete
 
           # Set cache control for HTML files
-          aws s3 cp frontend/dist/index.html s3://quizspark-frontend/index.html --cache-control "no-cache, no-store, must-revalidate"
+          aws s3 cp dist/index.html s3://quizspark-frontend/index.html --cache-control "no-cache, no-store, must-revalidate"
 
           # Set cache control for assets
-          aws s3 cp frontend/dist/assets/ s3://quizspark-frontend/assets/ --recursive --cache-control "max-age=31536000, immutable"
+          aws s3 cp dist/assets/ s3://quizspark-frontend/assets/ --recursive --cache-control "max-age=31536000, immutable"
 
           # Configure bucket policy for public access
           aws s3api put-bucket-policy --bucket quizspark-frontend --policy '{
@@ -100,6 +98,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
