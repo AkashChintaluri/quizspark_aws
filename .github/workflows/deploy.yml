@@ -9,6 +9,7 @@ env:
   S3_BUCKET: quizspark-frontend
   EC2_INSTANCE: quizspark-backend
   ECR_REPOSITORY: quizspark-backend
+  TF_STATE_BUCKET: quizspark-terraform-state
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -25,6 +26,24 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Create Terraform state bucket
+        run: |
+          aws s3api head-bucket --bucket ${{ env.TF_STATE_BUCKET }} || \
+          aws s3api create-bucket \
+            --bucket ${{ env.TF_STATE_BUCKET }} \
+            --region ${{ env.AWS_REGION }} \
+            --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+          
+          # Enable versioning for state bucket
+          aws s3api put-bucket-versioning \
+            --bucket ${{ env.TF_STATE_BUCKET }} \
+            --versioning-configuration Status=Enabled
+          
+          # Enable server-side encryption
+          aws s3api put-bucket-encryption \
+            --bucket ${{ env.TF_STATE_BUCKET }} \
+            --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
       
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
