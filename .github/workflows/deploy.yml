@@ -115,7 +115,11 @@ jobs:
         id: get-ec2-ip
         run: |
           cd terraform
-          EC2_IP=$($TERRAFORM_CLI_PATH/terraform output -raw instance_public_ip)
+          echo "Current directory: $(pwd)"
+          echo "Terraform version: $(terraform version)"
+          echo "Terraform state list: $(terraform state list)"
+          EC2_IP=$(terraform output -raw instance_public_ip)
+          echo "EC2 IP: ${EC2_IP}"
           echo "::set-output name=ec2_ip::${EC2_IP}"
 
       - name: Deploy to EC2
