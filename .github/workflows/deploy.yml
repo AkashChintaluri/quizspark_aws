@@ -6,7 +6,7 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  S3_BUCKET: quizspark_frontend
+  S3_BUCKET: quizspark-frontend
   EC2_INSTANCE: quizspark-backend
   ECR_REPOSITORY: quizspark-backend
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -32,9 +32,14 @@ jobs:
       - name: Build frontend
         run: npm run build
       
+      - name: Create S3 bucket if not exists
+        run: |
+          aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} || \
+          aws s3api create-bucket --bucket ${{ env.S3_BUCKET }} --region ${{ env.AWS_REGION }} --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+      
       - name: Clean S3 bucket
         run: |
-          aws s3 rm s3://${{ env.S3_BUCKET }} --recursive
+          aws s3 rm s3://${{ env.S3_BUCKET }} --recursive || true
       
       - name: Deploy to S3
         run: |
@@ -49,6 +54,20 @@ jobs:
           
           # Enable website hosting
           aws s3 website s3://${{ env.S3_BUCKET }} --index-document index.html --error-document error.html
+          
+          # Configure bucket policy for public access
+          aws s3api put-bucket-policy --bucket ${{ env.S3_BUCKET }} --policy '{
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::'${{ env.S3_BUCKET }}'/*"
+              }
+            ]
+          }'
 
   deploy-backend:
     runs-on: ubuntu-latest
