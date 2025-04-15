@@ -1,0 +1,119 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: quizspark_frontend
+  EC2_INSTANCE: quizspark-backend
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+  JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Clean S3 bucket
+        run: |
+          aws s3 rm s3://${{ env.S3_BUCKET }} --recursive
+      
+      - name: Deploy to S3
+        run: |
+          # Upload all files with appropriate cache headers
+          aws s3 cp dist/ s3://${{ env.S3_BUCKET }}/ --recursive
+          
+          # Set cache control for HTML files
+          aws s3 cp dist/index.html s3://${{ env.S3_BUCKET }}/index.html --cache-control "no-cache, no-store, must-revalidate"
+          
+          # Set cache control for assets
+          aws s3 cp dist/assets/ s3://${{ env.S3_BUCKET }}/assets/ --recursive --cache-control "max-age=31536000, immutable"
+          
+          # Enable website hosting
+          aws s3 website s3://${{ env.S3_BUCKET }} --index-document index.html --error-document error.html
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Install dependencies
+        run: |
+          cd server
+          npm install
+      
+      - name: Build Docker image
+        run: |
+          cd server
+          docker build -t quizspark-backend .
+      
+      - name: Login to AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+      - name: Tag and push Docker image
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+          docker tag quizspark-backend:latest ${{ steps.login-ecr.outputs.registry }}/quizspark-backend:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/quizspark-backend:latest
+      
+      - name: Deploy to EC2
+        run: |
+          aws ec2 describe-instances --filters "Name=tag:Name,Values=${{ env.EC2_INSTANCE }}" --query "Reservations[].Instances[].PublicIpAddress" --output text > ec2_ip.txt
+          EC2_IP=$(cat ec2_ip.txt)
+          echo "Deploying to EC2 instance at $EC2_IP"
+          
+          # Create environment file
+          cat > .env << EOF
+          SUPABASE_URL=${{ env.SUPABASE_URL }}
+          SUPABASE_KEY=${{ env.SUPABASE_KEY }}
+          JWT_SECRET=${{ env.JWT_SECRET }}
+          NODE_ENV=production
+          PORT=3000
+          CORS_ORIGIN=https://${{ env.S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com
+          EOF
+          
+          # Copy deployment script
+          echo '#!/bin/bash
+          docker pull ${{ steps.login-ecr.outputs.registry }}/quizspark-backend:latest
+          docker stop quizspark-backend || true
+          docker rm quizspark-backend || true
+          docker run -d --name quizspark-backend -p 80:3000 \
+            -e SUPABASE_URL="$SUPABASE_URL" \
+            -e SUPABASE_KEY="$SUPABASE_KEY" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e NODE_ENV="production" \
+            -e PORT="3000" \
+            -e CORS_ORIGIN="https://${{ env.S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com" \
+            ${{ steps.login-ecr.outputs.registry }}/quizspark-backend:latest' > deploy.sh
+          
+          # Make script executable and copy to EC2
+          chmod +x deploy.sh
+          scp -o StrictHostKeyChecking=no deploy.sh ubuntu@$EC2_IP:/home/ubuntu/
+          
+          # Execute deployment script
+          ssh -o StrictHostKeyChecking=no ubuntu@$EC2_IP "chmod +x /home/ubuntu/deploy.sh && /home/ubuntu/deploy.sh" 
