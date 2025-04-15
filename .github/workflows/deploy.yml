@@ -5,10 +5,15 @@ on:
     branches: [ main ]
 
 jobs:
-  deploy:
+  setup-terraform:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -30,9 +35,93 @@ jobs:
             -var="supabase_key=${{ secrets.SUPABASE_KEY }}" \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}"
 
-      - name: Deploy Frontend
+  deploy-frontend:
+    needs: setup-terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
         run: |
           cd frontend
           npm install
+
+      - name: Build frontend
+        run: |
+          cd frontend
           npm run build
-          aws s3 sync dist/ s3://quizspark-frontend --delete 
+
+      - name: Deploy to S3
+        run: |
+          # Create S3 bucket if not exists
+          aws s3api head-bucket --bucket quizspark-frontend || \
+          aws s3api create-bucket --bucket quizspark-frontend --region ap-south-1 --create-bucket-configuration LocationConstraint=ap-south-1
+
+          # Configure bucket for website hosting
+          aws s3 website s3://quizspark-frontend --index-document index.html --error-document error.html
+
+          # Upload files
+          aws s3 sync frontend/dist/ s3://quizspark-frontend --delete
+
+          # Set cache control for HTML files
+          aws s3 cp frontend/dist/index.html s3://quizspark-frontend/index.html --cache-control "no-cache, no-store, must-revalidate"
+
+          # Set cache control for assets
+          aws s3 cp frontend/dist/assets/ s3://quizspark-frontend/assets/ --recursive --cache-control "max-age=31536000, immutable"
+
+          # Configure bucket policy for public access
+          aws s3api put-bucket-policy --bucket quizspark-frontend --policy '{
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::quizspark-frontend/*"
+              }
+            ]
+          }'
+
+  deploy-backend:
+    needs: setup-terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Get EC2 IP
+        id: get-ec2-ip
+        run: |
+          cd terraform
+          EC2_IP=$(terraform output -raw instance_public_ip)
+          echo "::set-output name=ec2_ip::${EC2_IP}"
+
+      - name: Deploy to EC2
+        run: |
+          # Get instance ID
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=quizspark-backend" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+
+          # Check instance status
+          aws ec2 describe-instance-status --instance-ids $INSTANCE_ID 
