@@ -198,7 +198,7 @@ jobs:
           
           # Make script executable and copy to EC2
           chmod +x deploy.sh
-          scp -o StrictHostKeyChecking=no deploy.sh ubuntu@${{ needs.deploy-infrastructure.outputs.ec2_ip }}:/home/ubuntu/
+          scp -o StrictHostKeyChecking=no deploy.sh ubuntu@${{ steps.get-ec2-ip.outputs.ec2_ip }}:/home/ubuntu/
           
           # Execute deployment script
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ needs.deploy-infrastructure.outputs.ec2_ip }} "chmod +x /home/ubuntu/deploy.sh && /home/ubuntu/deploy.sh" 
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ steps.get-ec2-ip.outputs.ec2_ip }} "chmod +x /home/ubuntu/deploy.sh && /home/ubuntu/deploy.sh" 
