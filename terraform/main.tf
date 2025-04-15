@@ -29,6 +29,48 @@ data "aws_subnets" "default" {
   }
 }
 
+# Check if security group exists
+data "aws_security_group" "existing" {
+  count = 1
+  filter {
+    name   = "tag:Name"
+    values = ["quizspark-backend-sg"]
+  }
+}
+
+# Security group for EC2 instance
+resource "aws_security_group" "quizspark_backend" {
+  count       = length(data.aws_security_group.existing) == 0 ? 1 : 0
+  name        = "quizspark-backend-sg"
+  description = "Security group for QuizSpark backend"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "quizspark-backend-sg"
+  }
+}
+
 # S3 Bucket for Frontend
 resource "aws_s3_bucket" "frontend" {
   bucket = "quizspark-frontend"
@@ -71,44 +113,65 @@ resource "aws_s3_bucket_policy" "frontend" {
   })
 }
 
-# EC2 Security Group
-resource "aws_security_group" "backend" {
-  name        = "quizspark-backend-sg"
-  description = "Security group for backend EC2 instance"
-  vpc_id      = data.aws_vpc.default.id
+# IAM role for EC2 instance
+resource "aws_iam_role" "ec2_role" {
+  name = "quizspark-backend-role"
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
 }
 
-# EC2 Instance
-resource "aws_instance" "backend" {
-  ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
-  instance_type          = "t2.micro"
-  vpc_security_group_ids = [aws_security_group.backend.id]
-  subnet_id              = data.aws_subnets.default.ids[0]
+# IAM policy for ECR access
+resource "aws_iam_policy" "ecr_policy" {
+  name = "quizspark-backend-ecr-policy"
 
-  tags = {
-    Name = "quizspark-backend"
-  }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Attach policy to role
+resource "aws_iam_role_policy_attachment" "ecr_attachment" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = aws_iam_policy.ecr_policy.arn
+}
+
+# IAM instance profile
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "quizspark-backend-profile"
+  role = aws_iam_role.ec2_role.name
+}
+
+# EC2 instance
+resource "aws_instance" "quizspark_backend" {
+  ami                    = "ami-0f5ee92e2d63afc18" # Ubuntu 22.04 LTS
+  instance_type          = "t2.micro"
+  key_name               = "quizspark-key" # Make sure this key exists in your AWS account
+  vpc_security_group_ids = [length(data.aws_security_group.existing) > 0 ? data.aws_security_group.existing[0].id : aws_security_group.quizspark_backend[0].id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+  subnet_id              = data.aws_subnets.default.ids[0]
 
   user_data = <<-EOF
               #!/bin/bash
@@ -116,14 +179,25 @@ resource "aws_instance" "backend" {
               apt-get install -y docker.io
               systemctl start docker
               systemctl enable docker
+              usermod -aG docker ubuntu
               EOF
+
+  tags = {
+    Name = "quizspark-backend"
+  }
+
+  root_block_device {
+    volume_size = 20
+    volume_type = "gp2"
+  }
+}
+
+# Output the instance public IP
+output "instance_public_ip" {
+  value = aws_instance.quizspark_backend.public_ip
 }
 
 # Outputs
 output "frontend_url" {
   value = aws_s3_bucket_website_configuration.frontend.website_endpoint
-}
-
-output "backend_public_ip" {
-  value = aws_instance.backend.public_ip
 } 

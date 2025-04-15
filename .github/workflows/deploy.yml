@@ -14,7 +14,51 @@ env:
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
 jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
+      
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+      
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_supabase_url: ${{ env.SUPABASE_URL }}
+          TF_VAR_supabase_key: ${{ env.SUPABASE_KEY }}
+          TF_VAR_jwt_secret: ${{ env.JWT_SECRET }}
+      
+      - name: Get EC2 IP
+        id: get-ec2-ip
+        run: |
+          cd terraform
+          EC2_IP=$(terraform output -raw instance_public_ip)
+          echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
+
   deploy-frontend:
+    needs: deploy-infrastructure
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -70,6 +114,7 @@ jobs:
           }'
 
   deploy-backend:
+    needs: [deploy-infrastructure, deploy-frontend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -108,10 +153,6 @@ jobs:
       
       - name: Deploy to EC2
         run: |
-          aws ec2 describe-instances --filters "Name=tag:Name,Values=${{ env.EC2_INSTANCE }}" --query "Reservations[].Instances[].PublicIpAddress" --output text > ec2_ip.txt
-          EC2_IP=$(cat ec2_ip.txt)
-          echo "Deploying to EC2 instance at $EC2_IP"
-          
           # Create environment file
           cat > .env << EOF
           SUPABASE_URL=${{ env.SUPABASE_URL }}
@@ -138,7 +179,7 @@ jobs:
           
           # Make script executable and copy to EC2
           chmod +x deploy.sh
-          scp -o StrictHostKeyChecking=no deploy.sh ubuntu@$EC2_IP:/home/ubuntu/
+          scp -o StrictHostKeyChecking=no deploy.sh ubuntu@${{ needs.deploy-infrastructure.outputs.ec2_ip }}:/home/ubuntu/
           
           # Execute deployment script
-          ssh -o StrictHostKeyChecking=no ubuntu@$EC2_IP "chmod +x /home/ubuntu/deploy.sh && /home/ubuntu/deploy.sh" 
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ needs.deploy-infrastructure.outputs.ec2_ip }} "chmod +x /home/ubuntu/deploy.sh && /home/ubuntu/deploy.sh" 
