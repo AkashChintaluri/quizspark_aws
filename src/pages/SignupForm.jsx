@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './SignupForm.css';
 
+// API base URL
+const API_BASE_URL = 'http://13.200.253.50:80';
+
 function SignupForm() {
     const navigate = useNavigate();
     const [formData, setFormData] = useState({
@@ -35,7 +38,7 @@ function SignupForm() {
         setIsLoading(true);
 
         try {
-            const response = await axios.post('http://localhost:3000/signup', formData);
+            const response = await axios.post(`${API_BASE_URL}/signup`, formData);
             setShowPopup(true);
             console.log('Signup successful:', response.data);
         } catch (error) {

@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Login.css';
 
+// API base URL
+const API_BASE_URL = 'http://13.200.253.50:80';
+
 function TeacherLogin() {
     const navigate = useNavigate();
     const [formData, setFormData] = useState({ username: '', password: '' });
@@ -31,7 +34,7 @@ function TeacherLogin() {
         setErrorMessage('');
 
         try {
-            const response = await axios.post('http://localhost:3000/login', {
+            const response = await axios.post(`${API_BASE_URL}/login`, {
                 ...formData,
                 userType: 'teacher'
             });
