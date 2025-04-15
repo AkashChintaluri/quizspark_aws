@@ -63,40 +63,58 @@ jobs:
 
       - name: Deploy to S3
         run: |
-          # Create S3 bucket if not exists
-          aws s3api head-bucket --bucket quizspark-frontend || \
-          aws s3api create-bucket --bucket quizspark-frontend --region ap-south-1 --create-bucket-configuration LocationConstraint=ap-south-1
+          # Create a unique bucket name using timestamp
+          BUCKET_NAME="quizspark-frontend-$(date +%s)"
+          echo "Using bucket name: ${BUCKET_NAME}"
+          
+          # Create S3 bucket
+          aws s3api create-bucket \
+            --bucket ${BUCKET_NAME} \
+            --region ap-south-1 \
+            --create-bucket-configuration LocationConstraint=ap-south-1
 
-          # Configure bucket for website hosting
-          aws s3 website s3://quizspark-frontend --index-document index.html --error-document error.html
+          # Enable website hosting
+          aws s3api put-bucket-website \
+            --bucket ${BUCKET_NAME} \
+            --website-configuration '{
+              "IndexDocument": {"Suffix": "index.html"},
+              "ErrorDocument": {"Key": "error.html"}
+            }'
 
           # Upload files
-          aws s3 sync dist/ s3://quizspark-frontend --delete
+          aws s3 sync dist/ s3://${BUCKET_NAME} --delete
 
           # Set cache control for HTML files
-          aws s3 cp dist/index.html s3://quizspark-frontend/index.html --cache-control "no-cache, no-store, must-revalidate"
+          aws s3 cp dist/index.html s3://${BUCKET_NAME}/index.html --cache-control "no-cache, no-store, must-revalidate"
 
           # Set cache control for assets
-          aws s3 cp dist/assets/ s3://quizspark-frontend/assets/ --recursive --cache-control "max-age=31536000, immutable"
+          aws s3 cp dist/assets/ s3://${BUCKET_NAME}/assets/ --recursive --cache-control "max-age=31536000, immutable"
 
           # Configure bucket policy for public access
-          aws s3api put-bucket-policy --bucket quizspark-frontend --policy '{
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Sid": "PublicReadGetObject",
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": "s3:GetObject",
-                "Resource": "arn:aws:s3:::quizspark-frontend/*"
-              }
-            ]
-          }'
+          aws s3api put-bucket-policy \
+            --bucket ${BUCKET_NAME} \
+            --policy '{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "PublicReadGetObject",
+                  "Effect": "Allow",
+                  "Principal": "*",
+                  "Action": "s3:GetObject",
+                  "Resource": "arn:aws:s3:::'${BUCKET_NAME}'/*"
+                }
+              ]
+            }'
 
-      - name: Output Frontend URL
-        run: |
-          echo "Frontend URL: http://quizspark-frontend.s3-website-ap-south-1.amazonaws.com"
-          echo "::set-output name=frontend_url::http://quizspark-frontend.s3-website-ap-south-1.amazonaws.com"
+          # Enable public access block configuration
+          aws s3api put-public-access-block \
+            --bucket ${BUCKET_NAME} \
+            --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+          # Output the website URL
+          echo "Frontend URL: http://${BUCKET_NAME}.s3-website-ap-south-1.amazonaws.com"
+          echo "::set-output name=frontend_url::http://${BUCKET_NAME}.s3-website-ap-south-1.amazonaws.com"
+          echo "::set-output name=bucket_name::${BUCKET_NAME}"
 
   deploy-backend:
     needs: setup-terraform
