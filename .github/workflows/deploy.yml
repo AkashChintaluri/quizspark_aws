@@ -186,23 +186,11 @@ jobs:
           CORS_ORIGIN=https://${{ env.S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com
           EOF
           
-          # Copy deployment script
-          echo '#!/bin/bash
-          docker pull ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-          docker stop ${{ env.ECR_REPOSITORY }} || true
-          docker rm ${{ env.ECR_REPOSITORY }} || true
-          docker run -d --name ${{ env.ECR_REPOSITORY }} -p 80:3000 \
-            -e SUPABASE_URL="$SUPABASE_URL" \
-            -e SUPABASE_KEY="$SUPABASE_KEY" \
-            -e JWT_SECRET="$JWT_SECRET" \
-            -e NODE_ENV="production" \
-            -e PORT="3000" \
-            -e CORS_ORIGIN="https://${{ env.S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com" \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest' > deploy.sh
+          # Get instance ID
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=quizspark-backend" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
           
-          # Make script executable and copy to EC2
-          chmod +x deploy.sh
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/quizspark deploy.sh ubuntu@${{ steps.get-ec2-ip.outputs.ec2_ip }}:/home/ubuntu/
-          
-          # Execute deployment script
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/quizspark ubuntu@${{ steps.get-ec2-ip.outputs.ec2_ip }} "chmod +x /home/ubuntu/deploy.sh && /home/ubuntu/deploy.sh" 
+          # Check instance status
+          aws ec2 describe-instance-status --instance-ids $INSTANCE_ID 
