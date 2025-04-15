@@ -121,36 +121,9 @@ resource "aws_iam_role" "ec2_role" {
   })
 }
 
-# IAM policy for ECR access
-resource "aws_iam_policy" "ecr_policy" {
-  name = "quizspark-backend-ecr-policy"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "ecr:GetAuthorizationToken",
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage"
-        ]
-        Effect   = "Allow"
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-# Attach policy to role
-resource "aws_iam_role_policy_attachment" "ecr_attachment" {
-  role       = aws_iam_role.ec2_role.name
-  policy_arn = aws_iam_policy.ecr_policy.arn
-}
-
-# IAM policy for SSM access
-resource "aws_iam_policy" "ssm_policy" {
-  name = "quizspark-backend-ssm-policy"
+# IAM policy for EC2 instance
+resource "aws_iam_policy" "ec2_policy" {
+  name = "quizspark-backend-ec2-policy"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -202,10 +175,10 @@ resource "aws_iam_policy" "ssm_policy" {
   })
 }
 
-# Attach SSM policy to role
-resource "aws_iam_role_policy_attachment" "ssm_attachment" {
+# Attach policy to role
+resource "aws_iam_role_policy_attachment" "ec2_attachment" {
   role       = aws_iam_role.ec2_role.name
-  policy_arn = aws_iam_policy.ssm_policy.arn
+  policy_arn = aws_iam_policy.ec2_policy.arn
 }
 
 # IAM instance profile
@@ -225,28 +198,63 @@ resource "aws_instance" "quizspark_backend" {
 
   user_data = <<-EOF
               #!/bin/bash
-              # Install Docker
+              # Update system
               apt-get update
-              apt-get install -y docker.io
-              systemctl start docker
-              systemctl enable docker
-              usermod -aG docker ubuntu
+              apt-get upgrade -y
 
-              # Login to ECR
-              aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${var.ecr_registry}
+              # Install Node.js and npm
+              curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+              apt-get install -y nodejs
 
-              # Pull and run the container
-              docker pull ${var.ecr_registry}/${var.ecr_repository}:latest
-              docker stop ${var.ecr_repository} || true
-              docker rm ${var.ecr_repository} || true
-              docker run -d --name ${var.ecr_repository} -p 80:3000 \
-                -e SUPABASE_URL="${var.supabase_url}" \
-                -e SUPABASE_KEY="${var.supabase_key}" \
-                -e JWT_SECRET="${var.jwt_secret}" \
-                -e NODE_ENV="production" \
-                -e PORT="3000" \
-                -e CORS_ORIGIN="https://${var.s3_bucket}.s3-website.${var.aws_region}.amazonaws.com" \
-                ${var.ecr_registry}/${var.ecr_repository}:latest
+              # Install PM2 globally
+              npm install -g pm2
+
+              # Create application directory
+              mkdir -p /var/www/quizspark
+              cd /var/www/quizspark
+
+              # Clone the repository (you'll need to set up GitHub credentials or use a different method)
+              git clone https://github.com/yourusername/quizspark.git .
+
+              # Install dependencies
+              npm install
+
+              # Create .env file
+              cat > .env << EOL
+              SUPABASE_URL="${var.supabase_url}"
+              SUPABASE_KEY="${var.supabase_key}"
+              JWT_SECRET="${var.jwt_secret}"
+              NODE_ENV="production"
+              PORT="3000"
+              CORS_ORIGIN="http://13.200.253.50:80,https://${var.s3_bucket}.s3-website.${var.aws_region}.amazonaws.com"
+              EOL
+
+              # Start the application with PM2
+              pm2 start npm --name "quizspark" -- start
+              pm2 save
+              pm2 startup
+
+              # Install and configure Nginx
+              apt-get install -y nginx
+              cat > /etc/nginx/sites-available/quizspark << EOL
+              server {
+                  listen 80;
+                  server_name _;
+
+                  location / {
+                      proxy_pass http://localhost:3000;
+                      proxy_http_version 1.1;
+                      proxy_set_header Upgrade \$http_upgrade;
+                      proxy_set_header Connection 'upgrade';
+                      proxy_set_header Host \$host;
+                      proxy_cache_bypass \$http_upgrade;
+                  }
+              }
+              EOL
+
+              ln -s /etc/nginx/sites-available/quizspark /etc/nginx/sites-enabled/
+              rm /etc/nginx/sites-enabled/default
+              systemctl restart nginx
               EOF
 
   tags = {
@@ -280,17 +288,6 @@ variable "s3_bucket" {
   description = "S3 bucket name for frontend"
   type        = string
   default     = "quizspark-frontend"
-}
-
-variable "ecr_repository" {
-  description = "ECR repository name"
-  type        = string
-  default     = "quizspark-backend"
-}
-
-variable "ecr_registry" {
-  description = "ECR registry URL"
-  type        = string
 }
 
 variable "supabase_url" {

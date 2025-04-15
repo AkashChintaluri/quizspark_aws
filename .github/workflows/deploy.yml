@@ -1,196 +1,38 @@
-name: Deploy to AWS
+name: Deploy QuizSpark
 
 on:
   push:
     branches: [ main ]
 
-env:
-  AWS_REGION: ap-south-1
-  S3_BUCKET: quizspark-frontend
-  EC2_INSTANCE: quizspark-backend
-  ECR_REPOSITORY: quizspark-backend
-  TF_STATE_BUCKET: quizspark-terraform-state
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-  JWT_SECRET: ${{ secrets.JWT_SECRET }}
-
 jobs:
-  deploy-infrastructure:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Create Terraform state bucket
-        run: |
-          aws s3api head-bucket --bucket ${{ env.TF_STATE_BUCKET }} || \
-          aws s3api create-bucket \
-            --bucket ${{ env.TF_STATE_BUCKET }} \
-            --region ${{ env.AWS_REGION }} \
-            --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
-          
-          # Enable versioning for state bucket
-          aws s3api put-bucket-versioning \
-            --bucket ${{ env.TF_STATE_BUCKET }} \
-            --versioning-configuration Status=Enabled
-          
-          # Enable server-side encryption
-          aws s3api put-bucket-encryption \
-            --bucket ${{ env.TF_STATE_BUCKET }} \
-            --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
-      
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: "1.5.0"
-      
-      - name: Terraform Init
+          aws-region: ap-south-1
+
+      - name: Deploy Infrastructure
         run: |
           cd terraform
           terraform init
-      
-      - name: Terraform Plan
-        run: |
-          cd terraform
           terraform plan -out=tfplan \
-            -var="ecr_registry=${{ steps.login-ecr.outputs.registry }}" \
             -var="supabase_url=${{ secrets.SUPABASE_URL }}" \
             -var="supabase_key=${{ secrets.SUPABASE_KEY }}" \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}"
-      
-      - name: Terraform Apply
-        run: |
-          cd terraform
           terraform apply -auto-approve \
-            -var="ecr_registry=${{ steps.login-ecr.outputs.registry }}" \
             -var="supabase_url=${{ secrets.SUPABASE_URL }}" \
             -var="supabase_key=${{ secrets.SUPABASE_KEY }}" \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}"
-      
-      - name: Get EC2 IP
-        id: get-ec2-ip
-        run: |
-          cd terraform
-          EC2_IP=$(terraform output -raw instance_public_ip)
-          echo "::set-output name=ec2_ip::${EC2_IP}"
 
-  deploy-frontend:
-    needs: deploy-infrastructure
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Install dependencies
-        run: npm install
-      
-      - name: Build frontend
-        run: npm run build
-      
-      - name: Create S3 bucket if not exists
+      - name: Deploy Frontend
         run: |
-          aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} || \
-          aws s3api create-bucket --bucket ${{ env.S3_BUCKET }} --region ${{ env.AWS_REGION }} --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
-      
-      - name: Clean S3 bucket
-        run: |
-          aws s3 rm s3://${{ env.S3_BUCKET }} --recursive || true
-      
-      - name: Deploy to S3
-        run: |
-          # Upload all files with appropriate cache headers
-          aws s3 cp dist/ s3://${{ env.S3_BUCKET }}/ --recursive
-          
-          # Set cache control for HTML files
-          aws s3 cp dist/index.html s3://${{ env.S3_BUCKET }}/index.html --cache-control "no-cache, no-store, must-revalidate"
-          
-          # Set cache control for assets
-          aws s3 cp dist/assets/ s3://${{ env.S3_BUCKET }}/assets/ --recursive --cache-control "max-age=31536000, immutable"
-          
-          # Enable website hosting
-          aws s3 website s3://${{ env.S3_BUCKET }} --index-document index.html --error-document error.html
-          
-          # Configure bucket policy for public access
-          aws s3api put-bucket-policy --bucket ${{ env.S3_BUCKET }} --policy '{
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Sid": "PublicReadGetObject",
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": "s3:GetObject",
-                "Resource": "arn:aws:s3:::'${{ env.S3_BUCKET }}'/*"
-              }
-            ]
-          }'
-
-  deploy-backend:
-    needs: [deploy-infrastructure, deploy-frontend]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Install dependencies
-        run: |
-          cd server
+          cd frontend
           npm install
-      
-      - name: Build Docker image
-        run: |
-          cd server
-          docker build -t ${{ env.ECR_REPOSITORY }} .
-      
-      - name: Login to AWS ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      
-      - name: Create ECR repository if not exists
-        run: |
-          aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }} || \
-          aws ecr create-repository --repository-name ${{ env.ECR_REPOSITORY }} --image-scanning-configuration scanOnPush=true
-      
-      - name: Tag and push Docker image
-        run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
-          docker tag ${{ env.ECR_REPOSITORY }}:latest ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-      
-      - name: Deploy to EC2
-        run: |
-          # Create environment file
-          cat > .env << EOF
-          SUPABASE_URL=${{ env.SUPABASE_URL }}
-          SUPABASE_KEY=${{ env.SUPABASE_KEY }}
-          JWT_SECRET=${{ env.JWT_SECRET }}
-          NODE_ENV=production
-          PORT=3000
-          CORS_ORIGIN=https://${{ env.S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com
-          EOF
-          
-          # Get instance ID
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=quizspark-backend" \
-            --query "Reservations[0].Instances[0].InstanceId" \
-            --output text)
-          
-          # Check instance status
-          aws ec2 describe-instance-status --instance-ids $INSTANCE_ID 
+          npm run build
+          aws s3 sync dist/ s3://quizspark-frontend --delete 
