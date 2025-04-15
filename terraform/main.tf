@@ -62,12 +62,12 @@ resource "aws_security_group" "quizspark_backend" {
 }
 
 # S3 Bucket for Frontend
-resource "aws_s3_bucket" "frontend" {
+data "aws_s3_bucket" "frontend" {
   bucket = "quizspark-frontend"
 }
 
 resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
+  bucket = data.aws_s3_bucket.frontend.id
 
   index_document {
     suffix = "index.html"
@@ -79,7 +79,7 @@ resource "aws_s3_bucket_website_configuration" "frontend" {
 }
 
 resource "aws_s3_bucket_public_access_block" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
+  bucket = data.aws_s3_bucket.frontend.id
 
   block_public_acls       = false
   block_public_policy     = false
@@ -88,7 +88,7 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
 }
 
 resource "aws_s3_bucket_policy" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
+  bucket = data.aws_s3_bucket.frontend.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -97,7 +97,7 @@ resource "aws_s3_bucket_policy" "frontend" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.frontend.arn}/*"
+        Resource  = "${data.aws_s3_bucket.frontend.arn}/*"
       }
     ]
   })
@@ -158,7 +158,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 resource "aws_instance" "quizspark_backend" {
   ami                    = "ami-0f5ee92e2d63afc18" # Ubuntu 22.04 LTS
   instance_type          = "t2.micro"
-  key_name               = "quizspark-key" # Make sure this key exists in your AWS account
+  key_name               = "quizspark" # Updated key pair name
   vpc_security_group_ids = [aws_security_group.quizspark_backend.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
   subnet_id              = data.aws_subnets.default.ids[0]
