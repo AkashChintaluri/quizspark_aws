@@ -40,7 +40,6 @@ data "aws_security_group" "existing" {
 
 # Security group for EC2 instance
 resource "aws_security_group" "quizspark_backend" {
-  count       = length(data.aws_security_group.existing) == 0 ? 1 : 0
   name        = "quizspark-backend-sg"
   description = "Security group for QuizSpark backend"
   vpc_id      = data.aws_vpc.default.id
@@ -169,7 +168,7 @@ resource "aws_instance" "quizspark_backend" {
   ami                    = "ami-0f5ee92e2d63afc18" # Ubuntu 22.04 LTS
   instance_type          = "t2.micro"
   key_name               = "quizspark-key" # Make sure this key exists in your AWS account
-  vpc_security_group_ids = [length(data.aws_security_group.existing) > 0 ? data.aws_security_group.existing[0].id : aws_security_group.quizspark_backend[0].id]
+  vpc_security_group_ids = [aws_security_group.quizspark_backend.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
   subnet_id              = data.aws_subnets.default.ids[0]
 
