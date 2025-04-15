@@ -93,6 +93,11 @@ jobs:
             ]
           }'
 
+      - name: Output Frontend URL
+        run: |
+          echo "Frontend URL: http://quizspark-frontend.s3-website-ap-south-1.amazonaws.com"
+          echo "::set-output name=frontend_url::http://quizspark-frontend.s3-website-ap-south-1.amazonaws.com"
+
   deploy-backend:
     needs: setup-terraform
     runs-on: ubuntu-latest
@@ -132,4 +137,9 @@ jobs:
             --output text)
 
           # Check instance status
-          aws ec2 describe-instance-status --instance-ids $INSTANCE_ID 
+          aws ec2 describe-instance-status --instance-ids $INSTANCE_ID
+
+      - name: Output Backend URL
+        run: |
+          echo "Backend API URL: http://${{ steps.get-ec2-ip.outputs.ec2_ip }}:80"
+          echo "::set-output name=backend_url::http://${{ steps.get-ec2-ip.outputs.ec2_ip }}:80" 
