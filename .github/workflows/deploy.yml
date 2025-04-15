@@ -74,7 +74,7 @@ jobs:
         run: |
           cd terraform
           EC2_IP=$(terraform output -raw instance_public_ip)
-          echo "ec2_ip=${EC2_IP}" >> $GITHUB_OUTPUT
+          echo "::set-output name=ec2_ip::${EC2_IP}"
 
   deploy-frontend:
     needs: deploy-infrastructure
