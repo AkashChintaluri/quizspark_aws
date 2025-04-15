@@ -198,13 +198,13 @@ resource "aws_instance" "quizspark_backend" {
 
   user_data = <<-EOF
               #!/bin/bash
-              # Update system
-              apt-get update
-              apt-get upgrade -y
-
-              # Install Node.js and npm
-              curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-              apt-get install -y nodejs
+              # Update system and install required packages in parallel
+              apt-get update && apt-get install -y \
+                curl \
+                git \
+                nginx \
+                nodejs \
+                npm
 
               # Install PM2 globally
               npm install -g pm2
@@ -213,7 +213,7 @@ resource "aws_instance" "quizspark_backend" {
               mkdir -p /var/www/quizspark
               cd /var/www/quizspark
 
-              # Clone the repository (you'll need to set up GitHub credentials or use a different method)
+              # Clone the repository
               git clone https://github.com/yourusername/quizspark.git .
 
               # Install dependencies
@@ -234,8 +234,7 @@ resource "aws_instance" "quizspark_backend" {
               pm2 save
               pm2 startup
 
-              # Install and configure Nginx
-              apt-get install -y nginx
+              # Configure Nginx
               cat > /etc/nginx/sites-available/quizspark << EOL
               server {
                   listen 80;
