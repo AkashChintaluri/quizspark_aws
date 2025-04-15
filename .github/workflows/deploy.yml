@@ -117,6 +117,7 @@ jobs:
           cd terraform
           echo "Current directory: $(pwd)"
           echo "Terraform version: $(terraform version)"
+          terraform init
           echo "Terraform state list: $(terraform state list)"
           EC2_IP=$(terraform output -raw instance_public_ip)
           echo "EC2 IP: ${EC2_IP}"
