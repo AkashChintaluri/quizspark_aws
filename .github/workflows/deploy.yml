@@ -63,11 +63,11 @@ jobs:
       - name: Terraform Apply
         run: |
           cd terraform
-          terraform apply -auto-approve tfplan
-        env:
-          TF_VAR_supabase_url: ${{ env.SUPABASE_URL }}
-          TF_VAR_supabase_key: ${{ env.SUPABASE_KEY }}
-          TF_VAR_jwt_secret: ${{ env.JWT_SECRET }}
+          terraform apply -auto-approve \
+            -var="ecr_registry=${{ steps.login-ecr.outputs.registry }}" \
+            -var="supabase_url=${{ secrets.SUPABASE_URL }}" \
+            -var="supabase_key=${{ secrets.SUPABASE_KEY }}" \
+            -var="jwt_secret=${{ secrets.JWT_SECRET }}"
       
       - name: Get EC2 IP
         id: get-ec2-ip
