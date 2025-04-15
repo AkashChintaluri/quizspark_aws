@@ -29,15 +29,6 @@ data "aws_subnets" "default" {
   }
 }
 
-# Check if security group exists
-data "aws_security_group" "existing" {
-  count = 1
-  filter {
-    name   = "tag:Name"
-    values = ["quizspark-backend-sg"]
-  }
-}
-
 # Security group for EC2 instance
 resource "aws_security_group" "quizspark_backend" {
   name        = "quizspark-backend-sg"
